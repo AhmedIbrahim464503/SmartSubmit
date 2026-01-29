@@ -51,7 +51,7 @@ async def check_deadlines() -> str:
     }
     
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Step 1: Get User ID (Needed for other calls)
             # Function: core_webservice_get_site_info
             params["wsfunction"] = "core_webservice_get_site_info"
@@ -90,8 +90,8 @@ async def check_deadlines() -> str:
             return "\n".join(result)
 
     except Exception as e:
-        logger.error(f"Error checking Moodlde: {str(e)}")
-        return f"Error checking Moodle: {str(e)}"
+        logger.error(f"Error checking Moodle: {repr(e)}")
+        return f"Error checking Moodle: {repr(e)}"
 
 async def submit_to_lms(assignment_id: str, file_path: str) -> str:
     """

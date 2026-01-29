@@ -21,8 +21,9 @@ A dual-mode AI agent for **NUST LMS (Moodle)** submissions, powered by **FastMCP
 2. **Configuration**
    - Copy `.env.example` to `.env`.
    - **MOODLE_TOKEN**:
-     - Go to `lms.nust.edu.pk` > Profile > Preferences > Security Keys.
-     - Generate a key for "Moodle mobile web service".
+     - Run the helper script: `python get_token.py`
+     - Enter your NUST Username and Password.
+     - Copy the generated token into your `.env` file.
    - **WHATSAPP_ALLOWED_NUMBER**: Your phone number.
 
 3. **Running the Agent**
