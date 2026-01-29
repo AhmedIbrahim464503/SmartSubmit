@@ -39,7 +39,11 @@ async def whatsapp_webhook(
     command = Body.strip().lower()
 
     if "status" in command or "deadline" in command:
-        response_text = await check_deadlines()
+        # Extract potential search term (e.g. "deadline lab 1" -> "lab 1")
+        query = command.replace("status", "").replace("deadline", "").strip()
+        # If query is empty strings like "", treat as None
+        query = query if query else None
+        response_text = await check_deadlines(query)
     
     elif "files" in command or "list" in command:
         # Default scan directory - in a real app, maybe configurable or derived from session

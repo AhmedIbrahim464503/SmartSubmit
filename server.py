@@ -18,9 +18,9 @@ async def get_my_files(directory: str) -> str:
     return await list_lab_files(directory)
 
 @mcp.tool()
-async def check_my_deadlines() -> str:
-    """Fetches active assignments and deadlines from the LMS."""
-    return await check_deadlines()
+async def check_my_deadlines(search_query: str = None) -> str:
+    """Fetches active assignments from the LMS. Optional: provide 'search_query' to filter by name."""
+    return await check_deadlines(search_query)
 
 @mcp.tool()
 async def submit_assignment(assignment_id: str, file_path: str) -> str:

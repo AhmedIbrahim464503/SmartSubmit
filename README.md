@@ -33,7 +33,17 @@ A dual-mode AI agent for **NUST LMS (Moodle)** submissions, powered by **FastMCP
    - Restart Claude Desktop.
 
    ### Mode B: WhatsApp (Webhook)
-   ```bash
-   uvicorn webhook:app --reload
-   ngrok http 8000
-   ```
+   1. Start the server (Terminal 1):
+      ```bash
+      uvicorn webhook:app --reload
+      ```
+   2. Expose to internet (Terminal 2):
+      *   **Option A (Recommended if installed)**:
+          ```bash
+          ngrok http 8000
+          ```
+      *   **Option B (No install needed)**:
+          ```bash
+          ssh -R 80:localhost:8000 serveo.net
+          ```
+          (Copy the `https://....serveo.net` URL it gives you)

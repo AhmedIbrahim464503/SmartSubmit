@@ -38,13 +38,15 @@ async def list_lab_files(directory: str) -> str:
         logger.error(f"Error scanning directory: {str(e)}")
         return f"Error scanning directory: {str(e)}"
 
-async def check_deadlines() -> str:
-    """Fetches upcoming assignments from Moodle (NUST LMS)."""
-    logger.info("Checking Moodle deadlines...")
+async def check_deadlines(search_query: str = None) -> str:
+    """
+    Fetches upcoming assignments from Moodle (NUST LMS).
+    search_query: Optional string to filter assignments (e.g., 'Lab 1', 'CS101').
+    """
+    logger.info(f"Checking Moodle deadlines... Query: {search_query}")
     if not MOODLE_TOKEN or not MOODLE_URL:
         return "Error: MOODLE_TOKEN or MOODLE_URL not set in .env"
 
-    # Moodle API params
     params = {
         "wstoken": MOODLE_TOKEN,
         "moodlewsrestformat": "json",
@@ -52,8 +54,7 @@ async def check_deadlines() -> str:
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Step 1: Get User ID (Needed for other calls)
-            # Function: core_webservice_get_site_info
+            # Step 1: Get User ID
             params["wsfunction"] = "core_webservice_get_site_info"
             resp = await client.get(MOODLE_URL, params=params)
             resp.raise_for_status()
@@ -64,10 +65,14 @@ async def check_deadlines() -> str:
             
             user_id = site_info["userid"]
             
-            # Step 2: Get Upcoming Action Events (Deadlines)
-            # Function: core_calendar_get_action_events_by_timesort
+            # Step 2: Get Upcoming Action Events
+            # We use `timesortfrom` to get only FUTURE events.
+            import time
+            now_ts = int(time.time())
+            
             params["wsfunction"] = "core_calendar_get_action_events_by_timesort"
-            # Optional: limit num etc.
+            params["timesortfrom"] = now_ts
+            # params["limitnum"] = 10 # Optional limit
             
             resp_events = await client.get(MOODLE_URL, params=params)
             resp_events.raise_for_status()
@@ -76,18 +81,33 @@ async def check_deadlines() -> str:
             events = events_data.get("events", [])
             
             if not events:
-                return "No upcoming deadlines found on Moodle."
+                return "No upcoming deadlines found (future only)."
             
-            result = ["Upcoming Moodle Deadlines:"]
+            result = []
+            import re
+            
             for e in events:
-                # Event Name, Course, Time
                 name = e.get("name", "Unknown Assignment")
                 course_id = e.get("course", {}).get("id", "??")
                 time_str = e.get("formattedtime", "No date")
-                url = e.get("url", "")
-                result.append(f"- {name} (Course {course_id}): Due {time_str}")
+                
+                # Filter by search_query if provided
+                full_text = f"{name} {course_id}".lower()
+                if search_query and search_query.lower() not in full_text:
+                    continue
+
+                # Clean cleaner output
+                # Remove HTML tags from name or description if any
+                clean_name = re.sub(r'<[^>]+>', '', name).strip()
+                result.append(f"- {clean_name} (Course {course_id}): Due {time_str}")
             
-            return "\n".join(result)
+            if not result:
+                return f"No deadlines found matching '{search_query}'."
+
+            header = f"Upcoming Moodle Deadlines"
+            if search_query:
+                header += f" (filtering for '{search_query}')"
+            return f"{header}:\n" + "\n".join(result)
 
     except Exception as e:
         logger.error(f"Error checking Moodle: {repr(e)}")
