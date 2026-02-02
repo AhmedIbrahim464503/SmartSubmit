@@ -19,16 +19,27 @@ logger = logging.getLogger(__name__)
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
 MOODLE_URL = os.getenv("MOODLE_URL") # e.g. https://lms.nust.edu.pk/webservice/rest/server.php
 
-async def list_lab_files(directory: str) -> str:
-    """Lists available PDF/Word reports in a specific directory."""
-    logger.info(f"Scanning directory: {directory}")
+async def list_lab_files(directory: str, search_query: str = None) -> str:
+    """Lists available PDF/Word reports in a specific directory. Optional filter."""
+    logger.info(f"Scanning directory: {directory} for query: {search_query}")
     try:
         if not os.path.exists(directory):
             logger.error(f"Directory not found: {directory}")
             return f"Error: Directory '{directory}' does not exist."
 
-        files = [f for f in os.listdir(directory) if f.lower().endswith(('.pdf', '.docx', '.doc'))]
+        # Filter extensions (PDF, Word, Excel, ZIP)
+        allowed_exts = ('.pdf', '.docx', '.doc', '.zip', '.xlsx', '.xls', '.csv')
+        all_files = [f for f in os.listdir(directory) if f.lower().endswith(allowed_exts)]
+        
+        # Filter by query if provided
+        if search_query:
+            files = [f for f in all_files if search_query.lower() in f.lower()]
+        else:
+            files = all_files
+
         if not files:
+            if search_query:
+                return f"No files found matching '{search_query}' in {directory}."
             logger.info("No report files found.")
             return "No PDF or Word documents found in the specified directory."
         

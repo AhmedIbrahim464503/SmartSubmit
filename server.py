@@ -1,3 +1,4 @@
+import os
 from fastmcp import FastMCP
 from tools import list_lab_files, check_deadlines, submit_to_lms
 import logging
@@ -13,22 +14,27 @@ logging.basicConfig(
 )
 
 @mcp.tool()
-async def list_documents(directory: str = None) -> str:
-    """Lists available PDF/Word reports. Defaults to LAB_DIRECTORY env if not provided."""
+async def list_documents(directory: str = None, query: str = None) -> str:
+    """
+    REQUIRED: Use this tool to list files on the USER'S local computer. 
+    Do NOT check /mnt/ or cloud paths. 
+    Lists documents (PDF, Word, Excel, ZIP) from the configured local directory.
+    Use 'query' to filter by name (e.g. 'Lab 1', 'Financial Report').
+    """
     target_dir = directory or os.getenv("LAB_DIRECTORY", "E:\\Downloads")
     
     if not os.path.exists(target_dir):
         # Fallback if preferred dir is missing
         fallback = os.path.expanduser("~/Downloads")
         if os.path.exists(fallback):
-            return await list_lab_files(fallback) + f"\n(Note: Could not find {target_dir}, listing from {fallback} instead)"
+            return await list_lab_files(fallback, query) + f"\n(Note: Could not find {target_dir}, listing from {fallback} instead)"
         return f"Error: Could not find directory {target_dir} or {fallback}"
 
-    return await list_lab_files(target_dir)
+    return await list_lab_files(target_dir, query)
 
 @mcp.tool()
 async def check_my_deadlines(search_query: str = None) -> str:
-    """Fetches active assignments from the LMS. Optional: provide 'search_query' to filter by name."""
+    """REQUIRED: Connects to the User's Real LMS (Moodle) to fetch actual upcoming assignments and deadlines."""
     return await check_deadlines(search_query)
 
 @mcp.tool()
