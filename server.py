@@ -13,9 +13,18 @@ logging.basicConfig(
 )
 
 @mcp.tool()
-async def get_my_files(directory: str) -> str:
-    """Lists available PDF/Word reports in a specific directory."""
-    return await list_lab_files(directory)
+async def list_documents(directory: str = None) -> str:
+    """Lists available PDF/Word reports. Defaults to LAB_DIRECTORY env if not provided."""
+    target_dir = directory or os.getenv("LAB_DIRECTORY", "E:\\Downloads")
+    
+    if not os.path.exists(target_dir):
+        # Fallback if preferred dir is missing
+        fallback = os.path.expanduser("~/Downloads")
+        if os.path.exists(fallback):
+            return await list_lab_files(fallback) + f"\n(Note: Could not find {target_dir}, listing from {fallback} instead)"
+        return f"Error: Could not find directory {target_dir} or {fallback}"
+
+    return await list_lab_files(target_dir)
 
 @mcp.tool()
 async def check_my_deadlines(search_query: str = None) -> str:

@@ -53,9 +53,9 @@ async def check_deadlines(search_query: str = None) -> str:
     }
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Step 1: Get User ID
-            params["wsfunction"] = "core_webservice_get_site_info"
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            # 1. Get User ID
+            user_url = f"{MOODLE_URL}?wstoken={MOODLE_TOKEN}&moodlewsrestformat=json&wsfunction=core_webservice_get_site_info"
             resp = await client.get(MOODLE_URL, params=params)
             resp.raise_for_status()
             site_info = resp.json()
@@ -89,6 +89,7 @@ async def check_deadlines(search_query: str = None) -> str:
             for e in events:
                 name = e.get("name", "Unknown Assignment")
                 course_id = e.get("course", {}).get("id", "??")
+                assign_id = str(e.get("instance", "N/A"))
                 time_str = e.get("formattedtime", "No date")
                 
                 # Filter by search_query if provided
@@ -99,7 +100,7 @@ async def check_deadlines(search_query: str = None) -> str:
                 # Clean cleaner output
                 # Remove HTML tags from name or description if any
                 clean_name = re.sub(r'<[^>]+>', '', name).strip()
-                result.append(f"- {clean_name} (Course {course_id}): Due {time_str}")
+                result.append(f"- {clean_name} (ID: {assign_id}, Course {course_id}): Due {time_str}")
             
             if not result:
                 return f"No deadlines found matching '{search_query}'."

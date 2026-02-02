@@ -1,10 +1,13 @@
 {
   "mcpServers": {
     "smartsubmit": {
-      "command": "python",
-      "args": ["server.py"],
+      "command": "C:/Program Files/Python312/python.exe",
+      "args": [
+        "c:/Users/DELL/OneDrive - National University of Sciences & Technology/Desktop/SmartSubmit/server.py"
+      ],
       "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "LAB_DIRECTORY": "E:\\Downloads"
       }
     }
   }
