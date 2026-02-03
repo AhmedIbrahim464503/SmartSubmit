@@ -46,7 +46,9 @@ async def list_lab_files(directory: str, search_query: str = None) -> str:
             return "No PDF or Word documents found in the specified directory."
         
         logger.info(f"Found {len(files)} files.")
-        return "Found files:\n" + "\n".join(files)
+        # Return FULL PATHS so the agent can submit them directly
+        full_paths = [os.path.join(directory, f) for f in files]
+        return "Found files:\n" + "\n".join(full_paths)
     except Exception as e:
         logger.error(f"Error scanning directory: {str(e)}")
         return f"Error scanning directory: {str(e)}"
@@ -180,6 +182,36 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
     try:
         async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
             
+            # --- STEP 0: RESOLVE ID (CMID -> INSTANCE ID) ---
+            # The user (or check_deadlines) often provides the "Course Module ID" (e.g. 1289553).
+            # But 'mod_assign_save_submission' demands the "Assignment Instance ID" (e.g. 505).
+            # We try to convert it.
+            real_assign_id = assignment_id
+            try:
+                # Attempt to treat input as CMID
+                cm_params = {
+                    "wstoken": MOODLE_TOKEN,
+                    "moodlewsrestformat": "json",
+                    "wsfunction": "core_course_get_course_module",
+                    "cmid": assignment_id
+                }
+                resp_cm = await client.get(MOODLE_URL, params=cm_params)
+                if resp_cm.status_code == 200:
+                    cm_data = resp_cm.json()
+                    # Response: { "cm": { "instance": 505, "modname": "assign", ... } } (structure varies)
+                    # Or sometimes directly the object? NUST formatting check needed.
+                    # Standard Moodle returns { "warnings": [], "cm": { ... } } or just the CM object?
+                    # Let's handle generic success.
+                    # Actually standard is: { "cm": { "id": 1289553, "course": 99, "module": 1, "name": "Lab 3", "modname": "assign", "instance": 4552, ... } }
+                    if isinstance(cm_data, dict) and "cm" in cm_data:
+                        found_instance = cm_data["cm"].get("instance")
+                        modname = cm_data["cm"].get("modname")
+                        if modname == "assign" and found_instance:
+                            real_assign_id = str(found_instance)
+                            logger.info(f"Resolved CMID {assignment_id} -> Assignment Instance ID {real_assign_id}")
+            except Exception as e:
+                logger.warning(f"ID Resolution failed (using {assignment_id} as is): {e}")
+
             # --- STEP 1: UPLOAD FILE TO DRAFT AREA ---
             logger.info("Step 1: Uploading file to Draft Area...")
             with open(file_path, 'rb') as f:
@@ -209,7 +241,7 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
                 "wstoken": MOODLE_TOKEN,
                 "moodlewsrestformat": "json",
                 "wsfunction": "mod_assign_save_submission",
-                "assignmentid": assignment_id,
+                "assignmentid": real_assign_id,
                 "plugindata[onlinetext_editor][text]": "",
                 "plugindata[onlinetext_editor][format]": 1,
                 "plugindata[onlinetext_editor][itemid]": 0,
@@ -224,7 +256,7 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
             # Or warnings list. If 'exception' key exists, it failed.
             if isinstance(save_data, dict) and "exception" in save_data:
                 logger.error(f"Save Submission failed: {save_data}")
-                return f"Error Saving Draft: {save_data.get('message')}"
+                return f"Error Saving Draft: {save_data.get('message')} (Translated ID: {real_assign_id})"
             
             logger.info("Draft saved successfully.")
 
@@ -234,7 +266,7 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
                 "wstoken": MOODLE_TOKEN,
                 "moodlewsrestformat": "json",
                 "wsfunction": "mod_assign_submit_for_grading",
-                "assignmentid": assignment_id,
+                "assignmentid": real_assign_id,
                 "acceptsubmissionstatement": 1
             }
             
@@ -247,9 +279,9 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
             if isinstance(final_data, dict) and "exception" in final_data:
                 msg = final_data.get('message', '')
                 logger.info(f"Auto-finalize skipped/failed: {msg}")
-                return f"SUCCESS: File '{os.path.basename(file_path)}' uploaded and saved to Assignment {assignment_id}.\\n(Note: 'Submit for Grading' button was not clicked automatically—this is normal for Direct Submissions or Re-submissions. Your file IS on Moodle)."
+                return f"SUCCESS: File '{os.path.basename(file_path)}' uploaded and saved to Assignment {real_assign_id}.\n(Note: 'Submit for Grading' button was not clicked automatically—this is normal for Direct Submissions or Re-submissions. Your file IS on Moodle)."
 
-            return f"SUCCESS: '{os.path.basename(file_path)}' has been fully submitted and finalized for Assignment {assignment_id}."
+            return f"SUCCESS: '{os.path.basename(file_path)}' has been fully submitted and finalized for Assignment {real_assign_id}."
 
     except Exception as e:
         logger.error(f"Submission Error: {repr(e)}")
