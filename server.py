@@ -1,5 +1,6 @@
 import os
-from services import list_lab_files, check_deadlines, submit_to_lms
+from fastmcp import FastMCP
+from tools import list_lab_files, check_deadlines, submit_to_lms
 import logging
 
 # Initialize FastMCP Server
@@ -26,7 +27,7 @@ async def list_documents(directory: str = None, query: str = None) -> str:
         # Fallback if preferred dir is missing
         fallback = os.path.expanduser("~/Downloads")
         if os.path.exists(fallback):
-            return await list_lab_files(fallback, query) + f"\n(Note: Could not find {target_dir}, listing from {fallback} instead)"
+            return await list_lab_files(fallback, query) + f"\\n(Note: Could not find {target_dir}, listing from {fallback} instead)"
         return f"Error: Could not find directory {target_dir} or {fallback}"
 
     return await list_lab_files(target_dir, query)

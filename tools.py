@@ -1,8 +1,6 @@
 import os
 import httpx
 import logging
-import re
-import time
 from typing import List, Optional
 from dotenv import load_dotenv
 
@@ -10,11 +8,48 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
+logging.basicConfig(
+    filename="student_agent.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Switch to Moodle Keys
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
 MOODLE_URL = os.getenv("MOODLE_URL") # e.g. https://lms.nust.edu.pk/webservice/rest/server.php
+
+async def list_lab_files(directory: str, search_query: str = None) -> str:
+    """Lists available PDF/Word reports in a specific directory. Optional filter."""
+    logger.info(f"Scanning directory: {directory} for query: {search_query}")
+    try:
+        if not os.path.exists(directory):
+            logger.error(f"Directory not found: {directory}")
+            return f"Error: Directory '{directory}' does not exist."
+
+        # Filter extensions (PDF, Word, Excel, ZIP)
+        allowed_exts = ('.pdf', '.docx', '.doc', '.zip', '.xlsx', '.xls', '.csv')
+        all_files = [f for f in os.listdir(directory) if f.lower().endswith(allowed_exts)]
+        
+        # Filter by query if provided (Smart Token Matching)
+        if search_query:
+            # "lab 1" -> ["lab", "1"] -> matches "Lab_Report_1.pdf"
+            tokens = search_query.lower().split()
+            files = [f for f in all_files if all(token in f.lower() for token in tokens)]
+        else:
+            files = all_files
+
+        if not files:
+            if search_query:
+                return f"No files found matching '{search_query}' in {directory}."
+            logger.info("No report files found.")
+            return "No PDF or Word documents found in the specified directory."
+        
+        logger.info(f"Found {len(files)} files.")
+        return "Found files:\n" + "\n".join(files)
+    except Exception as e:
+        logger.error(f"Error scanning directory: {str(e)}")
+        return f"Error scanning directory: {str(e)}"
 
 async def check_deadlines(search_query: str = None) -> str:
     """
@@ -34,6 +69,7 @@ async def check_deadlines(search_query: str = None) -> str:
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             # 1. Get User ID
+            user_url = f"{MOODLE_URL}?wstoken={MOODLE_TOKEN}&moodlewsrestformat=json&wsfunction=core_webservice_get_site_info"
             resp = await client.get(MOODLE_URL, params=params)
             resp.raise_for_status()
             site_info = resp.json()
@@ -43,27 +79,29 @@ async def check_deadlines(search_query: str = None) -> str:
             
             user_id = site_info["userid"]
             
-            # Step 1.5: Get Enrolled Courses (to map IDs to Names)
-            # This ensures we show "Compiler Construction" instead of "61184"
-            params["wsfunction"] = "core_enrol_get_users_courses"
-            params["userid"] = user_id
-            
+            # Step 1.5: Get User's Courses (Mapping ID -> Name)
+            # We do this to show "Compiler Construction" instead of "61184"
             course_map = {}
             try:
-                resp_courses = await client.get(MOODLE_URL, params=params)
+                courses_params = {
+                    "wstoken": MOODLE_TOKEN,
+                    "moodlewsrestformat": "json",
+                    "wsfunction": "core_enrol_get_users_courses",
+                    "userid": user_id
+                }
+                resp_courses = await client.get(MOODLE_URL, params=courses_params)
                 if resp_courses.status_code == 200:
-                    courses = resp_courses.json()
-                    if isinstance(courses, list):
-                        for c in courses:
-                            c_id = c.get("id")
-                            c_name = c.get("fullname")
-                            if c_id and c_name:
-                                course_map[c_id] = c_name
+                    courses_data = resp_courses.json()
+                    if isinstance(courses_data, list):
+                        # Create map: {61184: "Compiler Construction", ...}
+                        course_map = {c.get("id"): c.get("fullname", "Unknown Course") for c in courses_data}
+                        logger.info(f"Fetched {len(course_map)} courses for name mapping.")
             except Exception as e:
-                logger.warning(f"Failed to fetch course names: {e}")
+                logger.warning(f"Failed to fetch course names (continuing with IDs): {e}")
 
             # Step 2: Get Upcoming Action Events
             # We use `timesortfrom` to get only FUTURE events.
+            import time
             now_ts = int(time.time())
             
             params["wsfunction"] = "core_calendar_get_action_events_by_timesort"
@@ -80,17 +118,20 @@ async def check_deadlines(search_query: str = None) -> str:
                 return "No upcoming deadlines found (future only)."
             
             result = []
+            import re
             
             for e in events:
                 name = e.get("name", "Unknown Assignment")
                 course_info = e.get("course", {})
-                c_id_raw = course_info.get("id", -1)
+                course_id = course_info.get("id", "??")
                 
-                # Try to get Name from Map, then from Event, then fallback to ID
-                course_name = course_map.get(c_id_raw)
+                # Try to get name from Event -> if fail, get from Map -> if fail, use ID
+                course_name = course_info.get("fullname")
+                if not course_name and course_id in course_map:
+                    course_name = course_map[course_id]
                 if not course_name:
-                    course_name = course_info.get("fullname", f"Course {c_id_raw}")
-
+                    course_name = f"Course {course_id}"
+                
                 assign_id = str(e.get("instance", "N/A"))
                 time_str = e.get("formattedtime", "No date")
                 
@@ -132,8 +173,8 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
         return "Error: MOODLE_TOKEN or MOODLE_URL not set."
 
     # Derive upload URL from MOODLE_URL (replace rest/server.php with upload.php)
-    # Env: https://lms.nust.edu.pk/portal/webservice/rest/server.php
-    # Target: https://lms.nust.edu.pk/portal/webservice/upload.php
+    # Env: https://lms.nust.edu.pk/webservice/rest/server.php
+    # Target: https://lms.nust.edu.pk/webservice/upload.php
     upload_url = MOODLE_URL.replace("/rest/server.php", "/upload.php")
     
     try:
@@ -206,7 +247,7 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
             if isinstance(final_data, dict) and "exception" in final_data:
                 msg = final_data.get('message', '')
                 logger.info(f"Auto-finalize skipped/failed: {msg}")
-                return f"SUCCESS: File '{os.path.basename(file_path)}' uploaded and saved to Assignment {assignment_id}.\n(Note: 'Submit for Grading' button was not clicked automatically—this is normal for Direct Submissions or Re-submissions. Your file IS on Moodle)."
+                return f"SUCCESS: File '{os.path.basename(file_path)}' uploaded and saved to Assignment {assignment_id}.\\n(Note: 'Submit for Grading' button was not clicked automatically—this is normal for Direct Submissions or Re-submissions. Your file IS on Moodle)."
 
             return f"SUCCESS: '{os.path.basename(file_path)}' has been fully submitted and finalized for Assignment {assignment_id}."
 
