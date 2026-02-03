@@ -1,6 +1,5 @@
 import os
-from fastmcp import FastMCP
-from tools import list_lab_files, check_deadlines, submit_to_lms
+from services import list_lab_files, check_deadlines, submit_to_lms
 import logging
 
 # Initialize FastMCP Server

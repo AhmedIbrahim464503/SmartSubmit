@@ -1,6 +1,8 @@
 import os
 import httpx
 import logging
+import re
+import time
 from typing import List, Optional
 from dotenv import load_dotenv
 
@@ -8,46 +10,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    filename="student_agent.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 # Switch to Moodle Keys
 MOODLE_TOKEN = os.getenv("MOODLE_TOKEN")
 MOODLE_URL = os.getenv("MOODLE_URL") # e.g. https://lms.nust.edu.pk/webservice/rest/server.php
-
-async def list_lab_files(directory: str, search_query: str = None) -> str:
-    """Lists available PDF/Word reports in a specific directory. Optional filter."""
-    logger.info(f"Scanning directory: {directory} for query: {search_query}")
-    try:
-        if not os.path.exists(directory):
-            logger.error(f"Directory not found: {directory}")
-            return f"Error: Directory '{directory}' does not exist."
-
-        # Filter extensions (PDF, Word, Excel, ZIP)
-        allowed_exts = ('.pdf', '.docx', '.doc', '.zip', '.xlsx', '.xls', '.csv')
-        all_files = [f for f in os.listdir(directory) if f.lower().endswith(allowed_exts)]
-        
-        # Filter by query if provided
-        if search_query:
-            files = [f for f in all_files if search_query.lower() in f.lower()]
-        else:
-            files = all_files
-
-        if not files:
-            if search_query:
-                return f"No files found matching '{search_query}' in {directory}."
-            logger.info("No report files found.")
-            return "No PDF or Word documents found in the specified directory."
-        
-        logger.info(f"Found {len(files)} files.")
-        return "Found files:\n" + "\n".join(files)
-    except Exception as e:
-        logger.error(f"Error scanning directory: {str(e)}")
-        return f"Error scanning directory: {str(e)}"
 
 async def check_deadlines(search_query: str = None) -> str:
     """
@@ -67,7 +34,6 @@ async def check_deadlines(search_query: str = None) -> str:
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             # 1. Get User ID
-            user_url = f"{MOODLE_URL}?wstoken={MOODLE_TOKEN}&moodlewsrestformat=json&wsfunction=core_webservice_get_site_info"
             resp = await client.get(MOODLE_URL, params=params)
             resp.raise_for_status()
             site_info = resp.json()
@@ -77,9 +43,27 @@ async def check_deadlines(search_query: str = None) -> str:
             
             user_id = site_info["userid"]
             
+            # Step 1.5: Get Enrolled Courses (to map IDs to Names)
+            # This ensures we show "Compiler Construction" instead of "61184"
+            params["wsfunction"] = "core_enrol_get_users_courses"
+            params["userid"] = user_id
+            
+            course_map = {}
+            try:
+                resp_courses = await client.get(MOODLE_URL, params=params)
+                if resp_courses.status_code == 200:
+                    courses = resp_courses.json()
+                    if isinstance(courses, list):
+                        for c in courses:
+                            c_id = c.get("id")
+                            c_name = c.get("fullname")
+                            if c_id and c_name:
+                                course_map[c_id] = c_name
+            except Exception as e:
+                logger.warning(f"Failed to fetch course names: {e}")
+
             # Step 2: Get Upcoming Action Events
             # We use `timesortfrom` to get only FUTURE events.
-            import time
             now_ts = int(time.time())
             
             params["wsfunction"] = "core_calendar_get_action_events_by_timesort"
@@ -96,14 +80,17 @@ async def check_deadlines(search_query: str = None) -> str:
                 return "No upcoming deadlines found (future only)."
             
             result = []
-            import re
             
             for e in events:
                 name = e.get("name", "Unknown Assignment")
                 course_info = e.get("course", {})
-                course_id = course_info.get("id", "??")
-                course_name = course_info.get("fullname", f"Course {course_id}")
+                c_id_raw = course_info.get("id", -1)
                 
+                # Try to get Name from Map, then from Event, then fallback to ID
+                course_name = course_map.get(c_id_raw)
+                if not course_name:
+                    course_name = course_info.get("fullname", f"Course {c_id_raw}")
+
                 assign_id = str(e.get("instance", "N/A"))
                 time_str = e.get("formattedtime", "No date")
                 
