@@ -279,9 +279,35 @@ async def submit_to_lms(assignment_id: str, file_path: str) -> str:
             if isinstance(final_data, dict) and "exception" in final_data:
                 msg = final_data.get('message', '')
                 logger.info(f"Auto-finalize skipped/failed: {msg}")
-                return f"SUCCESS: File '{os.path.basename(file_path)}' uploaded and saved to Assignment {real_assign_id}.\n(Note: 'Submit for Grading' button was not clicked automatically—this is normal for Direct Submissions or Re-submissions. Your file IS on Moodle)."
-
-            return f"SUCCESS: '{os.path.basename(file_path)}' has been fully submitted and finalized for Assignment {real_assign_id}."
+            
+            # --- STEP 4: VERIFY SUBMISSION STATUS ---
+            # We don't trust the previous steps blindly. Check the actual status.
+            logger.info("Step 4: Verifying submission status...")
+            status_params = {
+                "wstoken": MOODLE_TOKEN,
+                "moodlewsrestformat": "json",
+                "wsfunction": "mod_assign_get_submission_status",
+                "assignid": real_assign_id
+            }
+            resp_status = await client.get(MOODLE_URL, params=status_params)
+            if resp_status.status_code == 200:
+                status_data = resp_status.json()
+                # Check 'lastattempt' -> 'submission' -> 'status'
+                # usually: { "lastattempt": { "submission": { "status": "submitted" } } }
+                last_attempt = status_data.get("lastattempt", {})
+                submission = last_attempt.get("submission", {})
+                status = submission.get("status", "unknown")
+                
+                logger.info(f"Final Submission Status: {status}")
+                
+                if status == "submitted":
+                     return f"SUCCESS: Assignment {real_assign_id} is marked as SUBMITTED. You are good to go! ✅"
+                elif status == "draft":
+                     return (f"PARTIAL SUCCESS: File uploaded to Assignment {real_assign_id}, but status is still 'DRAFT'.\n"
+                             f"⚠️ You MUST log in to Moodle and click 'Submit Assignment' (and check the 'My Own Work' box) manually.\n"
+                             f"The agent tried to do this but Moodle requires manual confirmation for this specific assignment.")
+            
+            return f"SUCCESS: File uploaded. Please verify on Moodle if the status is 'Submitted'. (Status code: {status})"
 
     except Exception as e:
         logger.error(f"Submission Error: {repr(e)}")
